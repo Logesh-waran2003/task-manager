@@ -10,7 +10,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip";
-import { Trash2 } from "lucide-react";
+import { Trash2, Sun, Moon } from "lucide-react";
 
 type Task = {
   id: string;
@@ -87,6 +87,15 @@ export default function KanbanBoard() {
   } | null>(null);
   const [showUndo, setShowUndo] = useState(false);
   const undoTimeout = useRef<NodeJS.Timeout | null>(null);
+  // Add dark mode toggle state
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("kanban-dark-mode");
+      if (stored !== null) return stored === "true";
+      return document.documentElement.classList.contains("dark");
+    }
+    return false;
+  });
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -102,6 +111,15 @@ export default function KanbanBoard() {
   useEffect(() => {
     localStorage.setItem("kanban-board-data", JSON.stringify(data));
   }, [data]);
+
+  // On mount, sync dark mode with localStorage
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, [isDark]);
 
   function onDragEnd(result: DropResult) {
     const { destination, source, draggableId } = result;
@@ -270,23 +288,57 @@ export default function KanbanBoard() {
     if (undoTimeout.current) clearTimeout(undoTimeout.current);
   }
 
+  function toggleDarkMode() {
+    setIsDark((prev) => {
+      const next = !prev;
+      if (next) {
+        document.documentElement.classList.add("dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+      }
+      localStorage.setItem("kanban-dark-mode", String(next));
+      return next;
+    });
+  }
+
   return (
     <div className="w-full max-w-6xl mx-auto">
       <div className="flex flex-col sm:flex-row items-center justify-between mb-8 gap-4">
-        <h1 className="text-3xl font-bold text-center">Kanban Board</h1>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowCommandBar(true)}
-              className="hidden sm:inline-flex"
-            >
-              <span className="font-mono text-xs">Ctrl+K</span> Add Task
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Shortcut: Ctrl+K or Cmd+K</TooltipContent>
-        </Tooltip>
+        <h1 className="text-3xl font-bold text-center">Task Board</h1>
+        <div className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleDarkMode}
+                aria-label="Toggle dark mode"
+              >
+                {isDark ? (
+                  <Sun className="w-5 h-5" />
+                ) : (
+                  <Moon className="w-5 h-5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {isDark ? "Light mode" : "Dark mode"}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCommandBar(true)}
+                className="hidden sm:inline-flex"
+              >
+                <span className="font-mono text-xs">Ctrl+K</span> Add Task
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Shortcut: Ctrl+K or Cmd+K</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
       {/* Command Bar Modal */}
       {showCommandBar && (
@@ -334,14 +386,17 @@ export default function KanbanBoard() {
                     <Card
                       ref={provided.innerRef}
                       {...provided.droppableProps}
-                      className={`min-h-[340px] flex flex-col transition-all duration-200 border-2 shadow-md ${
-                        snapshot.isDraggingOver
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30"
-                          : "border-transparent bg-white dark:bg-gray-800"
-                      } hide-scrollbar`}
+                      className={`min-h-[340px] flex flex-col transition-all duration-200 border-2 shadow-md rounded-b-xl
+                        bg-white/80 dark:bg-gray-800/80 p-0
+                        ${
+                          snapshot.isDraggingOver
+                            ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30"
+                            : "border-transparent"
+                        }
+                        hide-scrollbar`}
                     >
                       <CardHeader
-                        className={`rounded-t-xl p-4 mb-2 ${
+                        className={`rounded-t-xl p-4 ${
                           columnColors[column.id]
                         }`}
                       >
