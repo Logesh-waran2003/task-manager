@@ -10,6 +10,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip";
+import { Trash2 } from "lucide-react";
 
 type Task = {
   id: string;
@@ -78,6 +79,29 @@ export default function KanbanBoard() {
     inprogress: useRef<HTMLDivElement>(null),
     done: useRef<HTMLDivElement>(null),
   };
+  const [showCommandBar, setShowCommandBar] = useState(false);
+  const [undoInfo, setUndoInfo] = useState<{
+    task: Task;
+    columnId: string;
+    index: number;
+  } | null>(null);
+  const [showUndo, setShowUndo] = useState(false);
+  const undoTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Load from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("kanban-board-data");
+    if (saved) {
+      try {
+        setData(JSON.parse(saved));
+      } catch {}
+    }
+  }, []);
+
+  // Save to localStorage whenever data changes
+  useEffect(() => {
+    localStorage.setItem("kanban-board-data", JSON.stringify(data));
+  }, [data]);
 
   function onDragEnd(result: DropResult) {
     const { destination, source, draggableId } = result;
@@ -88,7 +112,7 @@ export default function KanbanBoard() {
     ) {
       return;
     }
-    
+
     // Add a small delay to ensure proper positioning after drop
     setTimeout(() => {
       const start = data.columns[source.droppableId];
@@ -134,32 +158,13 @@ export default function KanbanBoard() {
     }, 10);
   }
 
-  function handleAddTask(e?: React.FormEvent<HTMLFormElement>) {
-    if (e) e.preventDefault();
-    if (!newTask.trim()) return;
-    const id = `task-${Date.now()}`;
-    setData((prev) => {
-      const newTasks = { ...prev.tasks, [id]: { id, content: newTask } };
-      const newTodo = {
-        ...prev.columns.todo,
-        taskIds: [id, ...prev.columns.todo.taskIds],
-      };
-      return {
-        ...prev,
-        tasks: newTasks,
-        columns: { ...prev.columns, todo: newTodo },
-      };
-    });
-    setNewTask("");
-    inputRef.current?.focus();
-  }
-
-  // Keyboard shortcuts
+  // Command bar open/close and keyboard shortcut
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      // Cmd/Ctrl+Enter to add task
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        handleAddTask();
+      // Ctrl+K or Cmd+K to open command bar
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShowCommandBar(true);
       }
       // 1/2/3 to focus columns
       if (e.target instanceof HTMLInputElement) return;
@@ -178,12 +183,92 @@ export default function KanbanBoard() {
           behavior: "smooth",
           block: "center",
         });
-      // "t" to focus input
-      if (e.key === "t") inputRef.current?.focus();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // Focus input when command bar opens
+  useEffect(() => {
+    if (showCommandBar) {
+      setTimeout(() => inputRef.current?.focus(), 10);
+    }
+  }, [showCommandBar]);
+
+  function handleAddTaskFromCommandBar(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!newTask.trim()) return;
+    const id = `task-${Date.now()}`;
+    setData((prev) => {
+      const newTasks = { ...prev.tasks, [id]: { id, content: newTask } };
+      const newTodo = {
+        ...prev.columns.todo,
+        taskIds: [id, ...prev.columns.todo.taskIds],
+      };
+      return {
+        ...prev,
+        tasks: newTasks,
+        columns: { ...prev.columns, todo: newTodo },
+      };
+    });
+    setNewTask("");
+    setShowCommandBar(false);
+  }
+
+  // Close command bar with Esc
+  useEffect(() => {
+    function handleEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowCommandBar(false);
+    }
+    if (showCommandBar) {
+      window.addEventListener("keydown", handleEsc);
+      return () => window.removeEventListener("keydown", handleEsc);
+    }
+  }, [showCommandBar]);
+
+  function handleDeleteTask(taskId: string, columnId: string) {
+    setData((prev) => {
+      const newTasks = { ...prev.tasks };
+      const deletedTask = newTasks[taskId];
+      delete newTasks[taskId];
+      const oldIndex = prev.columns[columnId].taskIds.indexOf(taskId);
+      const newColumn = {
+        ...prev.columns[columnId],
+        taskIds: prev.columns[columnId].taskIds.filter((id) => id !== taskId),
+      };
+      // Set undo info
+      setUndoInfo({ task: deletedTask, columnId, index: oldIndex });
+      setShowUndo(true);
+      if (undoTimeout.current) clearTimeout(undoTimeout.current);
+      undoTimeout.current = setTimeout(() => setShowUndo(false), 5000);
+      return {
+        ...prev,
+        tasks: newTasks,
+        columns: { ...prev.columns, [columnId]: newColumn },
+      };
+    });
+  }
+
+  function handleUndoDelete() {
+    if (!undoInfo) return;
+    setData((prev) => {
+      const newTasks = { ...prev.tasks, [undoInfo.task.id]: undoInfo.task };
+      const newTaskIds = [...prev.columns[undoInfo.columnId].taskIds];
+      newTaskIds.splice(undoInfo.index, 0, undoInfo.task.id);
+      const newColumn = {
+        ...prev.columns[undoInfo.columnId],
+        taskIds: newTaskIds,
+      };
+      return {
+        ...prev,
+        tasks: newTasks,
+        columns: { ...prev.columns, [undoInfo.columnId]: newColumn },
+      };
+    });
+    setShowUndo(false);
+    setUndoInfo(null);
+    if (undoTimeout.current) clearTimeout(undoTimeout.current);
+  }
 
   return (
     <div className="w-full max-w-6xl mx-auto">
@@ -194,33 +279,45 @@ export default function KanbanBoard() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => inputRef.current?.focus()}
+              onClick={() => setShowCommandBar(true)}
               className="hidden sm:inline-flex"
             >
-              <span className="font-mono text-xs">t</span> Focus Input
+              <span className="font-mono text-xs">Ctrl+K</span> Add Task
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Shortcut: t</TooltipContent>
+          <TooltipContent>Shortcut: Ctrl+K or Cmd+K</TooltipContent>
         </Tooltip>
       </div>
-      <form onSubmit={handleAddTask} className="flex gap-2 mb-6 justify-center">
-        <Tooltip>
-          <TooltipTrigger asChild>
+      {/* Command Bar Modal */}
+      {showCommandBar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <form
+            onSubmit={handleAddTaskFromCommandBar}
+            className="bg-white dark:bg-neutral-900 rounded-xl shadow-2xl p-6 flex flex-col items-center w-full max-w-md"
+          >
             <Input
               ref={inputRef}
-              className="max-w-md text-lg bg-neutral-100/80 dark:bg-neutral-900/60 border-2 border-neutral-200 dark:border-neutral-700 shadow-inner focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:border-blue-400 transition-all"
-              placeholder="Add a new task... (Cmd/Ctrl+Enter)"
+              className="w-full text-lg bg-neutral-100/80 dark:bg-neutral-800/60 border-2 border-neutral-200 dark:border-neutral-700 shadow-inner focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:border-blue-400 transition-all"
+              placeholder="Add a new task... (Enter to add, Esc to close)"
               value={newTask}
               onChange={(e) => setNewTask(e.target.value)}
               aria-label="Add a new task"
             />
-          </TooltipTrigger>
-          <TooltipContent>Shortcut: Cmd/Ctrl+Enter</TooltipContent>
-        </Tooltip>
-        <Button type="submit" className="text-base px-6 py-2 rounded-md">
-          Add
-        </Button>
-      </form>
+            <div className="mt-3 flex gap-2">
+              <Button type="submit" className="text-base px-6 py-2 rounded-md">
+                Add
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowCommandBar(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
           {data.columnOrder.map((columnId) => {
@@ -269,11 +366,11 @@ export default function KanbanBoard() {
                                     "box-shadow 0.2s, background 0.2s, opacity 0.2s, transform 0.2s",
                                   zIndex: snapshot.isDragging ? 1000 : 1,
                                   opacity: snapshot.isDragging ? 1 : undefined,
-                                  transform: snapshot.isDragging 
-                                    ? `${provided.draggableProps.style?.transform} scale(1.02)` 
+                                  transform: snapshot.isDragging
+                                    ? `${provided.draggableProps.style?.transform} scale(1.02)`
                                     : provided.draggableProps.style?.transform,
                                 }}
-                                className={`min-h-[48px] p-3 rounded-lg bg-white/90 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 shadow-sm select-none flex items-center gap-2 mb-2
+                                className={`group min-h-[48px] p-3 rounded-lg bg-white/90 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 shadow-sm select-none flex items-center gap-2 mb-2
                                   ${
                                     snapshot.isDragging
                                       ? "shadow-2xl bg-blue-100 dark:bg-blue-900"
@@ -305,6 +402,16 @@ export default function KanbanBoard() {
                                 <span className="flex-1 text-base font-medium text-neutral-800 dark:text-neutral-100">
                                   {task.content}
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleDeleteTask(task.id, column.id)
+                                  }
+                                  className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-lg text-red-500 hover:text-red-700 focus:outline-none"
+                                  aria-label="Delete task"
+                                >
+                                  <Trash2 className="w-5 h-5" />
+                                </button>
                               </div>
                             )}
                           </Draggable>
@@ -322,15 +429,9 @@ export default function KanbanBoard() {
       <div className="mt-8 flex flex-wrap gap-4 justify-center text-xs text-muted-foreground">
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="cursor-help">Cmd/Ctrl+Enter</span>
+            <span className="cursor-help">Ctrl/Cmd+K</span>
           </TooltipTrigger>
-          <TooltipContent>Add task</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="cursor-help">t</span>
-          </TooltipTrigger>
-          <TooltipContent>Focus input</TooltipContent>
+          <TooltipContent>Show add task bar</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -339,6 +440,19 @@ export default function KanbanBoard() {
           <TooltipContent>Scroll to column</TooltipContent>
         </Tooltip>
       </div>
+      {showUndo && undoInfo && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-neutral-900 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-4 animate-in fade-in">
+          <span>Task deleted</span>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleUndoDelete}
+            className="bg-white text-neutral-900 hover:bg-gray-200"
+          >
+            Undo
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
