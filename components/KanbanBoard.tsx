@@ -10,7 +10,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip";
-import { Trash2, Sun, Moon } from "lucide-react";
+import { Trash2, Sun, Moon, Briefcase, User, Layers } from "lucide-react";
 
 type Task = {
   id: string;
@@ -66,8 +66,95 @@ const initialData: KanbanData = {
 // type ColumnKey = typeof columnKeys[number];
 type ColumnKey = "todo" | "inprogress" | "done";
 
+const profileOptions = [
+  { key: "all", icon: <Layers className="w-5 h-5" />, tooltip: "All" },
+  { key: "work", icon: <Briefcase className="w-5 h-5" />, tooltip: "Work" },
+  { key: "personal", icon: <User className="w-5 h-5" />, tooltip: "Personal" },
+];
+const profileKeys = ["work", "personal"];
+
 export default function KanbanBoard() {
-  const [data, setData] = useState<KanbanData>(initialData);
+  const defaultKanbanData: KanbanData = initialData;
+  const [profiles, setProfiles] = useState<{ [key: string]: KanbanData }>({});
+  const [activeProfile, setActiveProfile] = useState("all");
+
+  // Load profiles from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem("kanban-profiles");
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      // Only keep 'work' and 'personal'
+      setProfiles({
+        work: parsed.work || initialData,
+        personal: parsed.personal || initialData,
+      });
+    } else {
+      setProfiles({
+        work: initialData,
+        personal: initialData,
+      });
+    }
+    const storedActive = localStorage.getItem("kanban-active-profile");
+    if (storedActive && ["all", ...profileKeys].includes(storedActive)) {
+      setActiveProfile(storedActive);
+    }
+  }, []);
+
+  // Save profiles and active profile to localStorage
+  useEffect(() => {
+    localStorage.setItem("kanban-profiles", JSON.stringify(profiles));
+    localStorage.setItem("kanban-active-profile", activeProfile);
+  }, [profiles, activeProfile]);
+
+  // When switching profiles, just update activeProfile
+  function switchProfile(profile: string) {
+    setActiveProfile(profile);
+  }
+
+  // Merged data for 'All' view
+  function getMergedData(): KanbanData {
+    // Merge columns by id, merge tasks, and merge taskIds for each column
+    const merged: KanbanData = {
+      columns: {
+        todo: { id: "todo", title: "To Do", taskIds: [] },
+        inprogress: { id: "inprogress", title: "In Progress", taskIds: [] },
+        done: { id: "done", title: "Done", taskIds: [] },
+      },
+      tasks: {},
+      columnOrder: ["todo", "inprogress", "done"],
+    };
+    for (const profile of profileKeys) {
+      const data = profiles[profile];
+      if (!data) continue;
+      for (const colId of merged.columnOrder) {
+        merged.columns[colId].taskIds.push(
+          ...data.columns[colId].taskIds.map((tid) => `${profile}__${tid}`)
+        );
+      }
+      for (const [tid, task] of Object.entries(data.tasks)) {
+        merged.tasks[`${profile}__${tid}`] = {
+          ...task,
+          id: `${profile}__${tid}`,
+        };
+      }
+    }
+    return merged;
+  }
+
+  // Add, move, delete logic for 'All'
+  function updateProfileData(profile: string, newData: KanbanData) {
+    setProfiles((prev) => ({ ...prev, [profile]: newData }));
+  }
+
+  const data =
+    activeProfile === "all"
+      ? getMergedData()
+      : profiles[activeProfile] || defaultKanbanData;
+  const setData = (newData: KanbanData) => {
+    if (activeProfile === "all") return; // not used in 'all' mode
+    updateProfileData(activeProfile, newData);
+  };
+
   const [newTask, setNewTask] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   // Use a type-safe mapping for refs, allowing null
@@ -84,18 +171,12 @@ export default function KanbanBoard() {
     task: Task;
     columnId: string;
     index: number;
+    profile?: string;
   } | null>(null);
   const [showUndo, setShowUndo] = useState(false);
   const undoTimeout = useRef<NodeJS.Timeout | null>(null);
-  // Add dark mode toggle state
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("kanban-dark-mode");
-      if (stored !== null) return stored === "true";
-      return document.documentElement.classList.contains("dark");
-    }
-    return false;
-  });
+  const [isDark, setIsDark] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -114,12 +195,25 @@ export default function KanbanBoard() {
 
   // On mount, sync dark mode with localStorage
   useEffect(() => {
+    // Only run on client
+    const stored = localStorage.getItem("kanban-dark-mode");
+    const dark =
+      stored !== null
+        ? stored === "true"
+        : document.documentElement.classList.contains("dark");
+    setIsDark(dark);
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
     if (isDark) {
       document.documentElement.classList.add("dark");
     } else {
       document.documentElement.classList.remove("dark");
     }
-  }, [isDark]);
+    localStorage.setItem("kanban-dark-mode", String(isDark));
+  }, [isDark, mounted]);
 
   function onDragEnd(result: DropResult) {
     const { destination, source, draggableId } = result;
@@ -130,7 +224,55 @@ export default function KanbanBoard() {
     ) {
       return;
     }
-
+    if (activeProfile === "all") {
+      // draggableId is in the form 'profile__taskid'
+      const [profile, ...rest] = draggableId.split("__");
+      if (profile !== "work" && profile !== "personal") return;
+      const realTaskId = rest.join("__");
+      const data = profiles[profile];
+      if (!data) return;
+      const start = data.columns[source.droppableId];
+      const finish = data.columns[destination.droppableId];
+      if (start === finish) {
+        const newTaskIds = Array.from(start.taskIds);
+        newTaskIds.splice(source.index, 1);
+        newTaskIds.splice(destination.index, 0, realTaskId);
+        const newColumn = {
+          ...start,
+          taskIds: newTaskIds,
+        };
+        updateProfileData(profile, {
+          ...data,
+          columns: {
+            ...data.columns,
+            [newColumn.id]: newColumn,
+          },
+        });
+        return;
+      }
+      // Moving from one column to another
+      const startTaskIds = Array.from(start.taskIds);
+      startTaskIds.splice(source.index, 1);
+      const newStart = {
+        ...start,
+        taskIds: startTaskIds,
+      };
+      const finishTaskIds = Array.from(finish.taskIds);
+      finishTaskIds.splice(destination.index, 0, realTaskId);
+      const newFinish = {
+        ...finish,
+        taskIds: finishTaskIds,
+      };
+      updateProfileData(profile, {
+        ...data,
+        columns: {
+          ...data.columns,
+          [newStart.id]: newStart,
+          [newFinish.id]: newFinish,
+        },
+      });
+      return;
+    }
     // Add a small delay to ensure proper positioning after drop
     setTimeout(() => {
       const start = data.columns[source.droppableId];
@@ -213,24 +355,32 @@ export default function KanbanBoard() {
     }
   }, [showCommandBar]);
 
+  // Add state for destination profile when adding in 'All'
+  const [addTaskProfile, setAddTaskProfile] = useState<
+    "work" | "personal" | null
+  >(null);
+
   function handleAddTaskFromCommandBar(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!newTask.trim()) return;
+    const profile = activeProfile === "all" ? addTaskProfile : activeProfile;
+    if (profile !== "work" && profile !== "personal") return;
+    if (!profiles[profile]) return; // extra safety for linter
     const id = `task-${Date.now()}`;
-    setData((prev) => {
-      const newTasks = { ...prev.tasks, [id]: { id, content: newTask } };
-      const newTodo = {
-        ...prev.columns.todo,
-        taskIds: [id, ...prev.columns.todo.taskIds],
-      };
-      return {
-        ...prev,
-        tasks: newTasks,
-        columns: { ...prev.columns, todo: newTodo },
-      };
+    updateProfileData(profile, {
+      ...profiles[profile],
+      tasks: { ...profiles[profile].tasks, [id]: { id, content: newTask } },
+      columns: {
+        ...profiles[profile].columns,
+        todo: {
+          ...profiles[profile].columns.todo,
+          taskIds: [id, ...profiles[profile].columns.todo.taskIds],
+        },
+      },
     });
     setNewTask("");
     setShowCommandBar(false);
+    setAddTaskProfile(null);
   }
 
   // Close command bar with Esc
@@ -245,43 +395,54 @@ export default function KanbanBoard() {
   }, [showCommandBar]);
 
   function handleDeleteTask(taskId: string, columnId: string) {
-    setData((prev) => {
-      const newTasks = { ...prev.tasks };
-      const deletedTask = newTasks[taskId];
-      delete newTasks[taskId];
-      const oldIndex = prev.columns[columnId].taskIds.indexOf(taskId);
+    if (activeProfile === "all") {
+      // taskId is in the form 'profile__taskid'
+      const [profile, ...rest] = taskId.split("__");
+      if (profile !== "work" && profile !== "personal") return;
+      const realTaskId = rest.join("__");
+      const data = profiles[profile];
+      if (!data) return;
+      const newTasks = { ...data.tasks };
+      const deletedTask = newTasks[realTaskId];
+      delete newTasks[realTaskId];
+      const oldIndex = data.columns[columnId].taskIds.indexOf(realTaskId);
       const newColumn = {
-        ...prev.columns[columnId],
-        taskIds: prev.columns[columnId].taskIds.filter((id) => id !== taskId),
+        ...data.columns[columnId],
+        taskIds: data.columns[columnId].taskIds.filter(
+          (id) => id !== realTaskId
+        ),
       };
-      // Set undo info
-      setUndoInfo({ task: deletedTask, columnId, index: oldIndex });
+      setUndoInfo({ task: deletedTask, columnId, index: oldIndex, profile });
       setShowUndo(true);
       if (undoTimeout.current) clearTimeout(undoTimeout.current);
       undoTimeout.current = setTimeout(() => setShowUndo(false), 5000);
-      return {
-        ...prev,
+      updateProfileData(profile, {
+        ...data,
         tasks: newTasks,
-        columns: { ...prev.columns, [columnId]: newColumn },
-      };
-    });
+        columns: { ...data.columns, [columnId]: newColumn },
+      });
+      return;
+    }
+    // ... existing code for single profile ...
   }
 
   function handleUndoDelete() {
     if (!undoInfo) return;
-    setData((prev) => {
-      const newTasks = { ...prev.tasks, [undoInfo.task.id]: undoInfo.task };
-      const newTaskIds = [...prev.columns[undoInfo.columnId].taskIds];
-      newTaskIds.splice(undoInfo.index, 0, undoInfo.task.id);
-      const newColumn = {
-        ...prev.columns[undoInfo.columnId],
-        taskIds: newTaskIds,
-      };
-      return {
-        ...prev,
-        tasks: newTasks,
-        columns: { ...prev.columns, [undoInfo.columnId]: newColumn },
-      };
+    const { profile, task, columnId, index } = undoInfo;
+    if (profile !== "work" && profile !== "personal") return;
+    const data = profiles[profile];
+    if (!data) return;
+    const newTasks = { ...data.tasks, [task.id]: task };
+    const newTaskIds = [...data.columns[columnId].taskIds];
+    newTaskIds.splice(index, 0, task.id);
+    const newColumn = {
+      ...data.columns[columnId],
+      taskIds: newTaskIds,
+    };
+    updateProfileData(profile, {
+      ...data,
+      tasks: newTasks,
+      columns: { ...data.columns, [columnId]: newColumn },
     });
     setShowUndo(false);
     setUndoInfo(null);
@@ -301,9 +462,33 @@ export default function KanbanBoard() {
     });
   }
 
+  if (!mounted) return null;
+
   return (
     <div className="w-full max-w-6xl mx-auto">
       <div className="flex flex-col sm:flex-row items-center justify-between mb-8 gap-4">
+        <div className="flex items-center gap-2">
+          {profileOptions.map((opt) => (
+            <Tooltip key={opt.key}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => switchProfile(opt.key)}
+                  className={`rounded-full p-2 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400
+                    ${
+                      activeProfile === opt.key
+                        ? "bg-blue-500 text-white"
+                        : "bg-transparent text-muted-foreground hover:bg-muted/30"
+                    }
+                  `}
+                  aria-label={opt.tooltip}
+                >
+                  {opt.icon}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{opt.tooltip}</TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
         <h1 className="text-3xl font-bold text-center">Task Board</h1>
         <div className="flex items-center gap-2">
           <Tooltip>
@@ -355,14 +540,41 @@ export default function KanbanBoard() {
               onChange={(e) => setNewTask(e.target.value)}
               aria-label="Add a new task"
             />
+            {activeProfile === "all" && (
+              <div className="flex gap-2 mt-3">
+                <Button
+                  type="button"
+                  variant={addTaskProfile === "work" ? "default" : "outline"}
+                  onClick={() => setAddTaskProfile("work")}
+                >
+                  Work
+                </Button>
+                <Button
+                  type="button"
+                  variant={
+                    addTaskProfile === "personal" ? "default" : "outline"
+                  }
+                  onClick={() => setAddTaskProfile("personal")}
+                >
+                  Personal
+                </Button>
+              </div>
+            )}
             <div className="mt-3 flex gap-2">
-              <Button type="submit" className="text-base px-6 py-2 rounded-md">
+              <Button
+                type="submit"
+                className="text-base px-6 py-2 rounded-md"
+                disabled={activeProfile === "all" && !addTaskProfile}
+              >
                 Add
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setShowCommandBar(false)}
+                onClick={() => {
+                  setShowCommandBar(false);
+                  setAddTaskProfile(null);
+                }}
               >
                 Cancel
               </Button>
