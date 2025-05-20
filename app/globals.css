@@ -120,3 +120,39 @@
     @apply bg-background text-foreground;
   }
 }
+/* Add this to your globals.css file */
+.dragging-item {
+  pointer-events: none;
+}
+
+/* Ensure droppable areas have proper spacing */
+.droppable-column {
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Fix for drag and drop visibility */
+[data-rbd-draggable-context-id] {
+  user-select: none !important;
+}
+
+[data-rbd-drag-handle-draggable-id] {
+  cursor: grab;
+}
+
+[data-rbd-drag-handle-draggable-id]:active {
+  cursor: grabbing;
+}
+
+/* Hide scrollbars but allow scrolling */
+.hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Add this to the end of your globals.css file */

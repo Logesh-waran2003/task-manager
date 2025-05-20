@@ -88,46 +88,50 @@ export default function KanbanBoard() {
     ) {
       return;
     }
-    const start = data.columns[source.droppableId];
-    const finish = data.columns[destination.droppableId];
-    if (start === finish) {
-      const newTaskIds = Array.from(start.taskIds);
-      newTaskIds.splice(source.index, 1);
-      newTaskIds.splice(destination.index, 0, draggableId);
-      const newColumn = {
+    
+    // Add a small delay to ensure proper positioning after drop
+    setTimeout(() => {
+      const start = data.columns[source.droppableId];
+      const finish = data.columns[destination.droppableId];
+      if (start === finish) {
+        const newTaskIds = Array.from(start.taskIds);
+        newTaskIds.splice(source.index, 1);
+        newTaskIds.splice(destination.index, 0, draggableId);
+        const newColumn = {
+          ...start,
+          taskIds: newTaskIds,
+        };
+        setData({
+          ...data,
+          columns: {
+            ...data.columns,
+            [newColumn.id]: newColumn,
+          },
+        });
+        return;
+      }
+      // Moving from one column to another
+      const startTaskIds = Array.from(start.taskIds);
+      startTaskIds.splice(source.index, 1);
+      const newStart = {
         ...start,
-        taskIds: newTaskIds,
+        taskIds: startTaskIds,
+      };
+      const finishTaskIds = Array.from(finish.taskIds);
+      finishTaskIds.splice(destination.index, 0, draggableId);
+      const newFinish = {
+        ...finish,
+        taskIds: finishTaskIds,
       };
       setData({
         ...data,
         columns: {
           ...data.columns,
-          [newColumn.id]: newColumn,
+          [newStart.id]: newStart,
+          [newFinish.id]: newFinish,
         },
       });
-      return;
-    }
-    // Moving from one column to another
-    const startTaskIds = Array.from(start.taskIds);
-    startTaskIds.splice(source.index, 1);
-    const newStart = {
-      ...start,
-      taskIds: startTaskIds,
-    };
-    const finishTaskIds = Array.from(finish.taskIds);
-    finishTaskIds.splice(destination.index, 0, draggableId);
-    const newFinish = {
-      ...finish,
-      taskIds: finishTaskIds,
-    };
-    setData({
-      ...data,
-      columns: {
-        ...data.columns,
-        [newStart.id]: newStart,
-        [newFinish.id]: newFinish,
-      },
-    });
+    }, 10);
   }
 
   function handleAddTask(e?: React.FormEvent<HTMLFormElement>) {
@@ -237,7 +241,7 @@ export default function KanbanBoard() {
                         snapshot.isDraggingOver
                           ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30"
                           : "border-transparent bg-white dark:bg-gray-800"
-                      }`}
+                      } hide-scrollbar`}
                     >
                       <CardHeader
                         className={`rounded-t-xl p-4 mb-2 ${
@@ -262,12 +266,17 @@ export default function KanbanBoard() {
                                 style={{
                                   ...provided.draggableProps.style,
                                   transition:
-                                    "box-shadow 0.2s, background 0.2s, opacity 0.2s",
+                                    "box-shadow 0.2s, background 0.2s, opacity 0.2s, transform 0.2s",
+                                  zIndex: snapshot.isDragging ? 1000 : 1,
+                                  opacity: snapshot.isDragging ? 1 : undefined,
+                                  transform: snapshot.isDragging 
+                                    ? `${provided.draggableProps.style?.transform} scale(1.02)` 
+                                    : provided.draggableProps.style?.transform,
                                 }}
-                                className={`min-h-[48px] p-3 rounded-lg bg-white/90 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 shadow-sm select-none flex items-center gap-2
+                                className={`min-h-[48px] p-3 rounded-lg bg-white/90 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 shadow-sm select-none flex items-center gap-2 mb-2
                                   ${
                                     snapshot.isDragging
-                                      ? "shadow-2xl z-10 bg-blue-100 dark:bg-blue-900 opacity-90"
+                                      ? "shadow-2xl bg-blue-100 dark:bg-blue-900"
                                       : ""
                                   }
                                 `}
