@@ -423,7 +423,33 @@ export default function KanbanBoard() {
       });
       return;
     }
-    // ... existing code for single profile ...
+    // Implement delete for work/personal profiles
+    if (activeProfile === "work" || activeProfile === "personal") {
+      const data = profiles[activeProfile];
+      if (!data) return;
+      const newTasks = { ...data.tasks };
+      const deletedTask = newTasks[taskId];
+      delete newTasks[taskId];
+      const oldIndex = data.columns[columnId].taskIds.indexOf(taskId);
+      const newColumn = {
+        ...data.columns[columnId],
+        taskIds: data.columns[columnId].taskIds.filter((id) => id !== taskId),
+      };
+      setUndoInfo({
+        task: deletedTask,
+        columnId,
+        index: oldIndex,
+        profile: activeProfile,
+      });
+      setShowUndo(true);
+      if (undoTimeout.current) clearTimeout(undoTimeout.current);
+      undoTimeout.current = setTimeout(() => setShowUndo(false), 5000);
+      setData({
+        ...data,
+        tasks: newTasks,
+        columns: { ...data.columns, [columnId]: newColumn },
+      });
+    }
   }
 
   function handleUndoDelete() {
@@ -461,6 +487,53 @@ export default function KanbanBoard() {
       return next;
     });
   }
+
+  // Add undo shortcut (Ctrl+Z or Cmd+Z)
+  useEffect(() => {
+    function handleUndoShortcut(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        if (showUndo && undoInfo) {
+          e.preventDefault();
+          handleUndoDelete();
+        }
+      }
+    }
+    window.addEventListener("keydown", handleUndoShortcut);
+    return () => window.removeEventListener("keydown", handleUndoShortcut);
+  }, [showUndo, undoInfo]);
+
+  // Add Space+1/2/3 shortcut to switch profiles (hold Space, then press 1/2/3)
+  useEffect(() => {
+    let spaceHeld = false;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.code === "Space") {
+        spaceHeld = true;
+      }
+      if (spaceHeld) {
+        if (e.key === "1") {
+          switchProfile("all");
+          e.preventDefault();
+        } else if (e.key === "2") {
+          switchProfile("work");
+          e.preventDefault();
+        } else if (e.key === "3") {
+          switchProfile("personal");
+          e.preventDefault();
+        }
+      }
+    }
+    function handleKeyUp(e: KeyboardEvent) {
+      if (e.code === "Space") {
+        spaceHeld = false;
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
 
   if (!mounted) return null;
 
